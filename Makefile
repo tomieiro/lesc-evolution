@@ -1,26 +1,22 @@
-OS := $(shell uname -s)
+CXX ?= g++
+CXXFLAGS ?= -std=c++14 -Wall -Wextra -Wpedantic
+LDLIBS ?= -lpthread -lfltk -lfltk_images -lX11
 
-FLAGS := -lpthread	-lfltk	-lfltk_images	-w	-lX11
+TARGET := release/lesc-evolution
+SOURCES := src/main/main.cpp src/evolution/base.cpp
 
-ifeq ($(OS),Linux)
-	LIBS := sudo apt install mesa-common-dev	libfltk1.3-dev	libfltk-images1.3
-endif
-ifeq ($(OS),Darwin)
-		LIBS := brew install fltk
-endif
+.PHONY: all clean run
 
-all:	evolution
-	g++	-o	release/Main.o	bin/base.o	src/main/main.cpp	$(FLAGS)
+all: $(TARGET)
 
-evolution:
-	g++	-c	src/evolution/base.cpp
-	mv	base.o	bin/base.o
+$(TARGET): $(SOURCES) headers/base.h headers/gui.h const/macros.h const/matrix.h | release
+	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES) $(LDLIBS)
+
+release:
+	mkdir -p $@
+
+run: $(TARGET)
+	./$(TARGET)
 
 clean:
-	rm bin/* release/*
-
-install_libs:
-	$(LIBS)
-
-run:
-	./release/Main.o
+	rm -f $(TARGET)

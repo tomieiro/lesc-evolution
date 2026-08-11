@@ -1,2 +1,5 @@
-
-src/.DS_Store
+.DS_Store
+bin/*
+!bin/.gitkeep
+release/*
+!release/.gitkeep
