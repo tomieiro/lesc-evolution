@@ -1,107 +1,79 @@
 #include "../../headers/base.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include <math.h>
-#include <time.h>
 
-using namespace std;
+#include <cstdlib>
 
-char traduz_direcao(int num_direcao){
-    switch (num_direcao){
-      case 0:
-        return 'a';
-      case 1:
-        return 'b';
-      case 2:
-        return 'c';
-        break;
-      case 3:
-        return 'd';
-    }
-    return 'n';
+namespace {
+
+char directionFromIndex(int direction_index) {
+  switch (direction_index) {
+    case 0: return 'a';
+    case 1: return 'b';
+    case 2: return 'c';
+    case 3: return 'd';
+    default: return 'n';
+  }
 }
 
-int traduz_num_direcao(char direcao){
-    switch (direcao){
-      case 'a':
-        return 0;
-      case 'b':
-        return 1;
-      case 'c':
-        return 2;
-        break;
-      case 'd':
-        return 3;
-    }
-    return 4;
+int directionIndex(char direction) {
+  switch (direction) {
+    case 'a': return 0;
+    case 'b': return 1;
+    case 'c': return 2;
+    case 'd': return 3;
+    default: return 0;
+  }
 }
 
+}  // namespace
 
-void iniciaPop(entity **entities, int population){
-  char dir;
-
-  for(int i = 0; i < population; i++){
+void initializePopulation(Entity **entities, int population) {
+  for (int i = 0; i < population; ++i) {
     entities[i]->dead = false;
     entities[i]->x = initial_x;
     entities[i]->y = initial_y;
-    entities[i]->passos_totais = 0;
+    entities[i]->total_steps = 0;
+    entities[i]->moves = static_cast<char *>(std::malloc(vector_size));
 
-    srand(time(NULL));rand();rand();rand();
-    
-    dir = traduz_direcao((rand()+i)%4);
-
-    entities[i]->movimentos = (char*)malloc(vector_size*sizeof(char));
-    for(int j=0; j<vector_size; j++){
-      entities[i]->movimentos[j] = 'n';
+    for (int step = 0; step < vector_size; ++step) {
+      entities[i]->moves[step] = 'n';
     }
-    entities[i]->movimentos[entities[i]->passos_totais] = dir;
-    entities[i]->passos_totais++;
+    entities[i]->moves[entities[i]->total_steps++] = directionFromIndex(std::rand() % 4);
   }
 }
 
-void Transa(entity **entities, int *thebest, entity *thebestofthebest, int population, float mutation){
+void reproduce(Entity **entities, const Entity *best_entity, int population, float mutation) {
+  for (int i = 0; i < population; ++i) {
+    Entity *entity = entities[i];
+    if (entity->total_steps >= vector_size) {
+      continue;
+    }
 
-  for(int i = 0; i < population; i++){
-
-    if(entities[i]->passos_totais < vector_size){
-      //Misturar genes para o individuo i
-      
-      for(int n=0; n<vector_size; n++){
-        if(n > entities[i]->passos_totais || n > entities[*thebest]->passos_totais) break;
-        
-        //Clonagem do the best por reproducao assexuada
-        entities[i]->movimentos[n] = traduz_direcao((int)(traduz_num_direcao(thebestofthebest->movimentos[n])));
-        
-        //Aplicacao de um fator inicial de mutacao
-        int aux_mut = traduz_num_direcao(entities[i]->movimentos[n]) + (((pow(-1,rand()%2+1))*(rand()%4)) * mutation*13);
-
-        //Definindo regra de aplicacao de mutacao
-        if(n < 5 || n >= (int)(entities[i]->passos_totais)*0.789){
-          if(aux_mut < 0) entities[i]->movimentos[n] = traduz_direcao((-aux_mut)%4);
-          else if(aux_mut > 3) entities[i]->movimentos[n] = traduz_direcao((aux_mut-entities[i]->movimentos[n])%4);
-          else entities[i]->movimentos[n] = traduz_direcao(aux_mut);
+    // Clone the best path and apply bounded directional mutations.
+    const int shared_steps = entity->total_steps < best_entity->total_steps
+                                 ? entity->total_steps
+                                 : best_entity->total_steps;
+    for (int step = 0; step < shared_steps; ++step) {
+      int direction = directionIndex(best_entity->moves[step]);
+      if (step < 5 || step >= static_cast<int>(entity->total_steps * 0.789F)) {
+        const int delta = (std::rand() % 2 == 0 ? -1 : 1) *
+                          static_cast<int>((std::rand() % 4) * mutation * 13.0F);
+        direction = (direction + delta) % 4;
+        if (direction < 0) {
+          direction += 4;
         }
-      
       }
-      //Fim da mistura
-      
-      entities[i]->movimentos[entities[i]->passos_totais] = traduz_direcao((rand()%400000)/100000);
-      entities[i]->passos_totais++;
+      entity->moves[step] = directionFromIndex(direction);
     }
-
+    entity->moves[entity->total_steps++] = directionFromIndex(std::rand() % 4);
   }
 }
 
-// Funcao que avalia uma populacao e define o melhor da geração e o melhor de todas as gerações
-void Avalia(entity **entities, int population, int *thebest, entity *thebestofthebest, float mutation, const unsigned char map[mapWidth][mapHeight], int best_x, int best_y, char *melhor_movimento){
-  thebestofthebest->dead = false;
-
-  if(best_x > thebestofthebest->x || best_y > thebestofthebest->y){    
-    thebestofthebest->x = best_x;
-    thebestofthebest->y = best_y;
-    for(int i=0; i<vector_size; i++){
-      thebestofthebest->movimentos[i] = melhor_movimento[i];
-    }
+void evaluatePopulation(Entity *best_entity, int best_x, int best_y, int best_steps, const char *best_moves) {
+  best_entity->dead = false;
+  best_entity->x = best_x;
+  best_entity->y = best_y;
+  best_entity->total_steps = best_steps;
+  for (int i = 0; i < vector_size; ++i) {
+    best_entity->moves[i] = best_moves[i];
   }
-
 }

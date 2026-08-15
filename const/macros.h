@@ -16,12 +16,12 @@
 #define initial_x 1
 #define initial_y 1
 
-typedef struct ent{
+typedef struct ent {
   bool dead;
-  unsigned char x;
-  unsigned char y;
-  int passos_totais;
-  char *movimentos;
-}entity;
+  int x;
+  int y;
+  int total_steps;
+  char *moves;
+} Entity;
 
 #endif
