@@ -1,53 +1,90 @@
-# Lesc-Evolution
-Este projeto desenvolvido na disciplina Sistemas Evolutivos Aplicados a Robotica-USP/ICMC, e implementa o Labyrinth Escape Evolution, mas de um jeito inusitado, utilizando computação evolutiva. Temidas por muitos, as baratas são uma das especies mais antigas da terra - Evidências arqueológicas indicam que esta espécie está presente no planeta a cerca de 380 milhões de ano. Resistentes à variadas temperaturas e umidade, elas são simbolo de resistência e curiosamente sofreram pouca evolução genética. 
+# LESC Evolution
 
+LESC Evolution is a C++ research prototype for studying evolutionary search in a two-dimensional maze. A population of agents incrementally evolves movement sequences while an FLTK interface renders the maze, population, and progress indicators.
 
-        ,--.     .--. 														  
-      /     \. ./     \ 												        
-     /   /\ / " \ /\   \												       
-      __/  {~~v~~}  \__  												        
-          {   |   }													                
-       /\{    |    }/\													                         
-    __/  {    |    }  \__
-	     {    |    }	
-	    /{    |    }\	
-       / {    |    } \	
-      /  {    |    }  \
-      \  \    |    /  /	 	
-       \  \   |   /  /
-        \  \  |  /  /    								
-         \  \ | /  /   														   
-        /   ~~~~~   \														  
+The repository is intended as a transparent starting point for experiments on search heuristics, mutation schedules, fitness functions, and maze topology. It is not a benchmark suite and does not make performance claims.
 
-## Contribuidores
-Felipe Oliveira
+## Research origin
 
-Matheus Tomieiro
+This project originated alongside neuroscience research into whether cockroaches could be directed with electronic implants for navigation tasks. Potential applications included search-and-rescue scenarios, maze traversal, and exploration in constrained environments. LESC Evolution abstracts that motivation into a software-only maze: its cockroach agents are simulated search entities, and the repository does not control or model biological organisms or implants.
 
-Victor Vieira Custodio Reis
+## Research model
 
-Yago Poletto
+Each entity starts at the configured initial cell and receives a finite sequence of directions. During an iteration, invalid moves and wall collisions terminate that entity's run. Surviving paths are compared using a directional progress heuristic and weighted Euclidean distance to the goal. The currently best path is copied into the next population with bounded directional mutations.
 
-## Linguagem utilizada
+The active experiment constants are defined in [`const/macros.h`](const/macros.h): maze dimensions, starting and ending positions, maximum path length, timing, and the displayed maze image. The active maze is [`const/matrix.h`](const/matrix.h); `matrix2.h` and `matrixbase.h` are alternative maps for manual experiments.
 
- O algoritmo evolutivo foi escrito em C e C++ e utiliza FLTK como Interface Gráfica.
+## Requirements
 
- ## Como executar
- Antes de tudo, instale as biblioteca utilizando o comando <code>make install_libs</code> na pasta raiz do projeto;
- 
- - Para executar(em Linux ou MACOSX):
- ```shell
+- A C++14 compiler and GNU Make
+- FLTK 1.3 development headers and libraries
+- X11 development libraries on Linux
+
+On Debian or Ubuntu, install the system packages with:
+
+```shell
+sudo apt install build-essential libfltk1.3-dev libfltk-images1.3-dev libx11-dev
+```
+
+On macOS, install FLTK through Homebrew and make sure its headers and libraries are discoverable by your compiler:
+
+```shell
+brew install fltk
+```
+
+## Build and run
+
+```shell
 make
 make run
- ```
- - Para Windows há um versão pré-compilada(Em desenvolvimento...).
- 
- 
-## Alterando o labirinto
-Para alterar o labirinto, basta criar uma matriz(padrão 20 x 20) seguindo o modelo das <code>const/matrix.h</code>. Depois, deverá se alterar dentro de <code>const/macros.h</code> a linha <code>#define MATRIX_IMG "img/map.png"</code> alterando o conteúdo entre aspas duplas para o path de uma imagem do mesmo tamanho da matriz(padrão 20px x 20px) em pixelart. O site https://www.pixilart.com/draw é uma excelente ferramenta! Vale a pena conferir. Por padrão a imagem deverá ser salva em um tamanho de 400px x 400px, para que possa se adequar à Gui. Por último, trocar o <code>#include "nova_matrix.h"</code> na main.c
- 
- 
-## Funcionamento
-As baratas precisam evoluir para superar os obstáculos do Maze e alcançar a saída. Para evoluir, inicialmente a barata considera a distancia euclídiana até o ponto de saída e as coordenadas vizinhas (x,y). A partir da barata melhor pontuada, filhas surgem e se movem nos eixos x e y e recalculam a distancia euclidiana. A cada iteração de evolução, o individuo filho compara se é superior ao melhor individuo da evolução até o momento, ou seja, caso o seu **x** e **y** for maior que melhor individuo e a distancia euclidiana menor, ele se torna o melhor individuo até ser substituído na evolução por outra barata melhor. Caso a barata fique presa em um canto, os pesos de pontuação mudarão e a barata comecerá a pontuar para outro lado do labirinto, sendo possível que ache outra rota.
+```
 
-Vídeo explicativo: https://drive.google.com/file/d/12U2CneKyA-9KRjdIDOi7yjjzkxBs-aDF/view?usp=sharing
+`make` creates `release/lesc-evolution`. Generated files in `bin/` and `release/` are intentionally ignored by Git. To remove the generated executable, run `make clean`.
+
+## Running an experiment
+
+1. Build and launch the application.
+2. Set the genetic mixing factor, population size, initial mutation rate, and the number of stagnant generations before the search rotates.
+3. Select **START** and observe the displayed fitness and best-path progress.
+4. Record the maze, constants, input values, source revision, run duration, and outcome outside the application. The current prototype does not persist experiment results.
+
+See [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) for a minimal reproducibility record and known limitations.
+
+## Maze configuration
+
+Maze cells use the following values:
+
+| Value | Meaning |
+| --- | --- |
+| `0` | Traversable cell |
+| `1` | Wall |
+| `2` | Goal |
+
+All maze headers must define a `mapWidth` × `mapHeight` matrix and retain a valid start and goal. To use another maze, replace the include of `const/matrix.h` in `src/main/main.cpp` with the desired matrix header, update the image path in `MATRIX_IMG`, and supply a matching 400 × 400 pixel image.
+
+## Repository layout
+
+```text
+const/             Maze definitions and experiment constants
+docs/              Research workflow and limitations
+headers/           Shared C++ and GUI declarations
+img/               Maze images
+project/           FLUID interface project file
+src/evolution/     Population initialization, mutation, and evaluation
+src/main/          Application entry point and FLTK interface
+```
+
+## Contributing
+
+Keep source comments, documentation, and commit messages in English. Do not commit generated binaries, object files, or operating-system metadata. Changes that affect search behavior should describe the affected parameters and include a reproducible manual test or automated check.
+
+## Authors
+
+- Felipe Oliveira
+- Matheus Tomieiro
+- Victor Vieira Custodio Reis
+- Yago Poletto
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
