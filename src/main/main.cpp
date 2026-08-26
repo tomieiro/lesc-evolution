@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iostream>
 #include <math.h>
+#include <mutex>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,9 +27,11 @@ int FIM = 0;
 
 Entity **cockroaches = nullptr;
 Entity *thebestofthebest = nullptr;
+std::mutex population_mutex;
 
 class Entity_Shape: public Fl_Widget {
   void draw(){
+    std::lock_guard<std::mutex> lock(population_mutex);
     fl_push_clip(x(),y(),w(),h());
     fl_push_matrix();
     fl_color(66,27,22);
@@ -79,9 +82,12 @@ static void start_listener(Fl_Return_Button*, void*){
   mutacao_inicial->deactivate();
   initial_mutation = (float)mutacao_inicial->value();
   start->deactivate();
-  cockroaches = static_cast<Entity **>(malloc(population * sizeof(Entity *)));
-  for (int i = 0; i < population; ++i) cockroaches[i] = static_cast<Entity *>(malloc(sizeof(Entity)));
-  initializePopulation(cockroaches, population);
+  {
+    std::lock_guard<std::mutex> lock(population_mutex);
+    cockroaches = static_cast<Entity **>(malloc(population * sizeof(Entity *)));
+    for (int i = 0; i < population; ++i) cockroaches[i] = static_cast<Entity *>(malloc(sizeof(Entity)));
+    initializePopulation(cockroaches, population);
+  }
   entities_on_matrix->show();
   entities_on_matrix->redraw();
   janela_principal->redraw();
@@ -177,11 +183,14 @@ void *evolve_routine(void*){
   int best_x = initial_x, best_y = initial_y, last_bx = best_x, last_by = best_y;
   int best_steps = 0;
   char *best_moves = static_cast<char *>(malloc(vector_size));
-  int fator = 1, fator2 = 1;
-  int geracoes_trancado = 0;
+  int direction_x = 1;
+  int direction_y = 1;
+  int stagnant_generations = 0;
   while(FIM != 1){
     if(start_pressed){
+        std::unique_lock<std::mutex> population_lock(population_mutex);
         gen++;
+        bool improved_this_generation = false;
         for(int j=0; j<vector_size; j++){
           if(all_dead()) break;
           for(int i=0; i<population; i++){
@@ -211,8 +220,10 @@ void *evolve_routine(void*){
                 FIM = 1;
               }
               
-              //Parte avaliativa quanto ao best_x e o best_y
-              if(fator2*cockroaches[i]->x >= best_x && fator*cockroaches[i]->y >= fator*best_y && !cockroaches[i]->dead){
+              // Compare progress in the active search orientation.
+              if (direction_x * cockroaches[i]->x >= direction_x * best_x &&
+                  direction_y * cockroaches[i]->y >= direction_y * best_y &&
+                  !cockroaches[i]->dead) {
                 best_x = cockroaches[i]->x;
                 best_y = cockroaches[i]->y;
                 best_steps = cockroaches[i]->total_steps;
@@ -220,11 +231,13 @@ void *evolve_routine(void*){
                   best_moves[p] = cockroaches[i]->moves[p];
                 }
                 mut_var = false;
-                geracoes_trancado = 0;
+                improved_this_generation = true;
               }
 
-              // Weighted Euclidean distance to the destination.
-              if((sqrt(pow(end_x - cockroaches[i]->x,2) + pow(end_y - cockroaches[i]->y,2))) < fator*(sqrt(pow(end_x - thebestofthebest->x,2) + pow(end_y - thebestofthebest->y,2))) && !cockroaches[i]->dead){
+              // Euclidean distance remains independent of search orientation.
+              if ((sqrt(pow(end_x - cockroaches[i]->x, 2) + pow(end_y - cockroaches[i]->y, 2))) <
+                  (sqrt(pow(end_x - thebestofthebest->x, 2) + pow(end_y - thebestofthebest->y, 2))) &&
+                  !cockroaches[i]->dead) {
                 best_x = cockroaches[i]->x;
                 best_y = cockroaches[i]->y;
                 best_steps = cockroaches[i]->total_steps;
@@ -232,12 +245,8 @@ void *evolve_routine(void*){
                   best_moves[p] = cockroaches[i]->moves[p];
                 }
                 mut_var = false;
-                geracoes_trancado = 0;
+                improved_this_generation = true;
               }
-
-              geracoes_trancado++;
-
-              //Fim das definicoes
             }
           }
           nanosleep(&tim,&tim2);
@@ -246,26 +255,24 @@ void *evolve_routine(void*){
       evaluatePopulation(thebestofthebest, best_x, best_y, best_steps, best_moves);
       reproduce(cockroaches, thebestofthebest, population, initial_mutation);
       restart_pop(best_x, best_y);
+      if (improved_this_generation) {
+        stagnant_generations = 0;
+      } else if (++stagnant_generations >= std::max(1, ge_value * 2)) {
+        // Rotate the directional heuristic 90 degrees after sustained stagnation.
+        const int previous_x_direction = direction_x;
+        direction_x = -direction_y;
+        direction_y = previous_x_direction;
+        stagnant_generations = 0;
+      }
+      population_lock.unlock();
+
       string aux_gen, aux_mutation;
       aux_gen.append("GENERATION: ");
       aux_gen.append(to_string(gen));
-      generation->label(aux_gen.c_str());
+      Fl::lock();
+      generation->copy_label(aux_gen.c_str());
       printf("Mutation: %.4f\n",initial_mutation);
 
-      if(geracoes_trancado >= (int)(ge_value*2)){
-        geracoes_trancado = 0;
-        fator2 = -fator2;
-      }
-     
-
-      if(gen%ge_value == 0){
-        fator = -fator;
-      }
-
-      if((gen%13) == 0 || (gen%57 == 0)){
-        fator = -fator;
-        fator2 = -fator2;
-      }
       if(gen%13 == 0){
         if(true){
           if(initial_mutation > 10000) initial_mutation = mutacao_inicial->value();
@@ -276,6 +283,8 @@ void *evolve_routine(void*){
 
       fitness->add(-sqrt(pow(end_x - thebestofthebest->x,2) + pow(end_y - thebestofthebest->y,2)));
       distancia_thebestofthebest->add(sqrt(pow(best_x - last_bx,2) + pow(best_y - last_by,2)));
+      Fl::awake();
+      Fl::unlock();
     }
 
     mut_var = true;
@@ -300,6 +309,7 @@ static void setInitialTheBest(){
 int main(){
 
   XInitThreads();
+  Fl::lock();
   srand(static_cast<unsigned int>(time(NULL)));
 
   tim.tv_sec  = 0;
