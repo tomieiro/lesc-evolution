@@ -1,6 +1,7 @@
 // Application entry point and FLTK interface.
 #include "../../const/matrix.h"
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 #include <math.h>
 #include <mutex>
@@ -19,11 +20,13 @@ using namespace std;
 bool start_pressed = false;
 int population = 0;
 int ge_value = 0;
+int rotation_interval = 46;
 float initial_mutation = 0.00;
 int gen = 0;
 struct timespec tim, tim2;
 bool mut_var = true;
-int FIM = 0;
+std::atomic<bool> stop_requested(false);
+std::atomic<bool> destination_reached(false);
 
 Entity **cockroaches = nullptr;
 Entity *thebestofthebest = nullptr;
@@ -55,6 +58,7 @@ Fl_Return_Button *start=(Fl_Return_Button *)0;
 Fl_Value_Input *ge=(Fl_Value_Input *)0;
 Fl_Value_Input *populacao=(Fl_Value_Input *)0;
 Fl_Value_Input *mutacao_inicial=(Fl_Value_Input *)0;
+Fl_Value_Input *rotation_generations=(Fl_Value_Input *)0;
 Fl_PNG_Image *png = (Fl_PNG_Image *)0;
 Fl_Box *background = (Fl_Box*)0;
 Fl_Box *generation = (Fl_Box*)0;
@@ -64,15 +68,22 @@ Fl_Chart *distancia_thebestofthebest = (Fl_Chart*)0;
 Entity_Shape *entities_on_matrix = (Entity_Shape*)0;
 
 static void update(void*){
-  if(FIM == 1){
-    FIM = 2;
+  if (destination_reached.exchange(false)) {
     fl_alert("Destination reached!");
+  }
+  if (stop_requested.load()) {
+    return;
   }
   entities_on_matrix->redraw();
   janela_principal->redraw();
   Fl::repeat_timeout(frames, update);
 }
 
+static void close_window(Fl_Widget*, void*) {
+  stop_requested.store(true);
+  Fl::remove_timeout(update);
+  janela_principal->hide();
+}
 
 static void start_listener(Fl_Return_Button*, void*){
   ge->deactivate();
@@ -81,6 +92,8 @@ static void start_listener(Fl_Return_Button*, void*){
   population = std::max(1, static_cast<int>(floor(populacao->value())));
   mutacao_inicial->deactivate();
   initial_mutation = (float)mutacao_inicial->value();
+  rotation_generations->deactivate();
+  rotation_interval = std::max(1, static_cast<int>(floor(rotation_generations->value())));
   start->deactivate();
   {
     std::lock_guard<std::mutex> lock(population_mutex);
@@ -101,6 +114,7 @@ static void start_listener(Fl_Return_Button*, void*){
 Fl_Double_Window* make_window() {
   { // Main GUI window.
     janela_principal = new Fl_Double_Window(800, 500, "LE_EVOLUTION");
+    janela_principal->callback(close_window);
     janela_principal->color((Fl_Color)237);
     janela_principal->labelfont(11);
     { // Maze image.
@@ -124,7 +138,7 @@ Fl_Double_Window* make_window() {
       distancia_thebestofthebest->bounds(-2,10);
     }
     { // Starts the evolutionary cycle.
-      start = new Fl_Return_Button(150, 180, 115, 30, "START");
+      start = new Fl_Return_Button(150, 205, 115, 30, "START");
       //start->box(FL_RSHADOW_BOX);
       start->color((Fl_Color)215);
       start->labelfont(11);
@@ -154,6 +168,13 @@ Fl_Double_Window* make_window() {
       mutacao_inicial->labelfont(11);
       mutacao_inicial->textfont(11);
     } // Initial mutation input.
+    { // Stagnant generations before rotating the search orientation.
+      rotation_generations = new Fl_Value_Input(180, 160, 180, 25, "ROTATE AFTER:");
+      rotation_generations->value(rotation_interval);
+      rotation_generations->color((Fl_Color)215);
+      rotation_generations->labelfont(11);
+      rotation_generations->textfont(11);
+    } // Search-rotation interval input.
     janela_principal->show();
     janela_principal->end();
   } // Fl_Double_Window* janela_principal
@@ -177,16 +198,34 @@ void restart_pop(int x, int y){
   }
 }
 
+void reset_population_after_rotation() {
+  const char directions[] = {'a', 'b', 'c', 'd'};
+  for (int i = 0; i < population; ++i) {
+    cockroaches[i]->x = initial_x;
+    cockroaches[i]->y = initial_y;
+    cockroaches[i]->dead = false;
+    cockroaches[i]->total_steps = 1;
+    for (int step = 0; step < vector_size; ++step) {
+      cockroaches[i]->moves[step] = 'n';
+    }
+    cockroaches[i]->moves[0] = directions[std::rand() % 4];
+  }
+}
+
 
 // Worker thread for the evolutionary algorithm.
 void *evolve_routine(void*){
   int best_x = initial_x, best_y = initial_y, last_bx = best_x, last_by = best_y;
   int best_steps = 0;
   char *best_moves = static_cast<char *>(malloc(vector_size));
+  for (int step = 0; step < vector_size; ++step) {
+    best_moves[step] = 'n';
+  }
   int direction_x = 1;
   int direction_y = 1;
+  int search_rotation = 0;
   int stagnant_generations = 0;
-  while(FIM != 1){
+  while (!stop_requested.load()) {
     if(start_pressed){
         std::unique_lock<std::mutex> population_lock(population_mutex);
         gen++;
@@ -217,12 +256,15 @@ void *evolve_routine(void*){
                 cockroaches[i]->y = next_y;
               }
               if (!cockroaches[i]->dead && map[mapHeight - 1 - next_y][next_x] == 2) {
-                FIM = 1;
+                destination_reached.store(true);
+                stop_requested.store(true);
               }
               
               // Compare progress in the active search orientation.
               if (direction_x * cockroaches[i]->x >= direction_x * best_x &&
                   direction_y * cockroaches[i]->y >= direction_y * best_y &&
+                  (direction_x * cockroaches[i]->x > direction_x * best_x ||
+                   direction_y * cockroaches[i]->y > direction_y * best_y) &&
                   !cockroaches[i]->dead) {
                 best_x = cockroaches[i]->x;
                 best_y = cockroaches[i]->y;
@@ -248,27 +290,49 @@ void *evolve_routine(void*){
                 improved_this_generation = true;
               }
             }
-          }
-          nanosleep(&tim,&tim2);
-        }
+      }
+      if (stop_requested.load()) break;
       nanosleep(&tim,&tim2);
-      evaluatePopulation(thebestofthebest, best_x, best_y, best_steps, best_moves);
-      reproduce(cockroaches, thebestofthebest, population, initial_mutation);
-      restart_pop(best_x, best_y);
+        }
+      if (stop_requested.load()) {
+        population_lock.unlock();
+        break;
+      }
+      nanosleep(&tim,&tim2);
+      bool rotate_search = false;
       if (improved_this_generation) {
         stagnant_generations = 0;
-      } else if (++stagnant_generations >= std::max(1, ge_value * 2)) {
-        // Rotate the directional heuristic 90 degrees after sustained stagnation.
+      } else if (++stagnant_generations >= rotation_interval) {
+        // Rotate the search frame and restart from the maze entrance.
         const int previous_x_direction = direction_x;
         direction_x = -direction_y;
         direction_y = previous_x_direction;
+        search_rotation = (search_rotation + 1) % 4;
         stagnant_generations = 0;
+        rotate_search = true;
+      }
+      if (rotate_search) {
+        best_x = initial_x;
+        best_y = initial_y;
+        best_steps = 0;
+        for (int step = 0; step < vector_size; ++step) {
+          best_moves[step] = 'n';
+        }
+        evaluatePopulation(thebestofthebest, best_x, best_y, best_steps, best_moves);
+        reset_population_after_rotation();
+      } else {
+        evaluatePopulation(thebestofthebest, best_x, best_y, best_steps, best_moves);
+        reproduce(cockroaches, thebestofthebest, population, initial_mutation);
+        restart_pop(best_x, best_y);
       }
       population_lock.unlock();
 
       string aux_gen, aux_mutation;
       aux_gen.append("GENERATION: ");
       aux_gen.append(to_string(gen));
+      aux_gen.append(" | SEARCH ROTATION: ");
+      aux_gen.append(to_string(search_rotation * 90));
+      aux_gen.append(" DEG");
       Fl::lock();
       generation->copy_label(aux_gen.c_str());
       printf("Mutation: %.4f\n",initial_mutation);
@@ -327,7 +391,8 @@ int main(){
 
   Fl::run();
 
-  FIM = 1;
+  stop_requested.store(true);
+  Fl::remove_timeout(update);
   pthread_join(evolution, NULL);
 
   free(thebestofthebest->moves);
