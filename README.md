@@ -45,7 +45,7 @@ make run
 
 1. Build and launch the application.
 2. Set the genetic mixing factor, population size, initial mutation rate, and the number of stagnant generations before the search rotates.
-3. Select **START** and observe the displayed fitness and best-path progress.
+3. Select **START** and observe the displayed fitness and best-path progress. When an agent reaches the goal, the application keeps the winning route visible and replays it continuously.
 4. Record the maze, constants, input values, source revision, run duration, and outcome outside the application. The current prototype does not persist experiment results.
 
 See [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) for a minimal reproducibility record and known limitations.

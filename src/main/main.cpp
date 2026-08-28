@@ -13,6 +13,8 @@
 #include <unistd.h>
 #include <math.h>
 #include <time.h>
+#include <utility>
+#include <vector>
 #include <X11/Xlib.h> 
 
 using namespace std;
@@ -27,16 +29,34 @@ struct timespec tim, tim2;
 bool mut_var = true;
 std::atomic<bool> stop_requested(false);
 std::atomic<bool> destination_reached(false);
+std::atomic<bool> solution_found(false);
 
 Entity **cockroaches = nullptr;
 Entity *thebestofthebest = nullptr;
 std::mutex population_mutex;
+std::vector<std::pair<int, int>> consolidated_path;
+std::size_t replay_path_index = 0;
+int replay_frame = 0;
+
+void append_solution_position(std::vector<std::pair<int, int>> *path, int *x, int *y, char move) {
+  if (move == 'd') ++*x;
+  else if (move == 'c') --*x;
+  else if (move == 'b') --*y;
+  else if (move == 'a') ++*y;
+  path->push_back(std::make_pair(*x, *y));
+}
 
 class Entity_Shape: public Fl_Widget {
   void draw(){
     std::lock_guard<std::mutex> lock(population_mutex);
     fl_push_clip(x(),y(),w(),h());
     fl_push_matrix();
+    fl_color(70, 130, 180);
+    for (const auto& position : consolidated_path) {
+      fl_rectf(x() + (position.first * mapWidth) + 5,
+               y() + ((mapHeight - 1 - position.second) * mapHeight) + 5,
+               mapWidth - 10, mapHeight - 10);
+    }
     fl_color(66,27,22);
     for(int i=0; i<population; i++){
       if(!cockroaches[i]->dead)
@@ -71,7 +91,17 @@ static void update(void*){
   if (destination_reached.exchange(false)) {
     fl_alert("Destination reached!");
   }
-  if (stop_requested.load()) {
+  if (solution_found.load()) {
+    std::lock_guard<std::mutex> lock(population_mutex);
+    if (!consolidated_path.empty() && ++replay_frame % 10 == 0) {
+      const auto& position = consolidated_path[replay_path_index];
+      thebestofthebest->x = position.first;
+      thebestofthebest->y = position.second;
+      thebestofthebest->dead = false;
+      replay_path_index = (replay_path_index + 1) % consolidated_path.size();
+    }
+  }
+  if (stop_requested.load() && !solution_found.load()) {
     return;
   }
   entities_on_matrix->redraw();
@@ -97,6 +127,10 @@ static void start_listener(Fl_Return_Button*, void*){
   start->deactivate();
   {
     std::lock_guard<std::mutex> lock(population_mutex);
+    consolidated_path.clear();
+    replay_path_index = 0;
+    replay_frame = 0;
+    solution_found.store(false);
     cockroaches = static_cast<Entity **>(malloc(population * sizeof(Entity *)));
     for (int i = 0; i < population; ++i) cockroaches[i] = static_cast<Entity *>(malloc(sizeof(Entity)));
     initializePopulation(cockroaches, population);
@@ -229,6 +263,8 @@ void *evolve_routine(void*){
     if(start_pressed){
         std::unique_lock<std::mutex> population_lock(population_mutex);
         gen++;
+        const int generation_start_x = best_x;
+        const int generation_start_y = best_y;
         bool improved_this_generation = false;
         for(int j=0; j<vector_size; j++){
           if(all_dead()) break;
@@ -256,6 +292,17 @@ void *evolve_routine(void*){
                 cockroaches[i]->y = next_y;
               }
               if (!cockroaches[i]->dead && map[mapHeight - 1 - next_y][next_x] == 2) {
+                consolidated_path.clear();
+                int path_x = generation_start_x;
+                int path_y = generation_start_y;
+                consolidated_path.push_back(std::make_pair(path_x, path_y));
+                for (int step = 0; step <= j; ++step) {
+                  append_solution_position(&consolidated_path, &path_x, &path_y,
+                                           cockroaches[i]->moves[step]);
+                }
+                replay_path_index = 0;
+                replay_frame = 0;
+                solution_found.store(true);
                 destination_reached.store(true);
                 stop_requested.store(true);
               }
