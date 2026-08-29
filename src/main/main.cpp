@@ -259,13 +259,13 @@ void *evolve_routine(void*){
   int direction_y = 1;
   int search_rotation = 0;
   int stagnant_generations = 0;
+  float best_distance_since_rotation = sqrt(pow(end_x - initial_x, 2) + pow(end_y - initial_y, 2));
   while (!stop_requested.load()) {
     if(start_pressed){
         std::unique_lock<std::mutex> population_lock(population_mutex);
         gen++;
         const int generation_start_x = best_x;
         const int generation_start_y = best_y;
-        bool improved_this_generation = false;
         for(int j=0; j<vector_size; j++){
           if(all_dead()) break;
           for(int i=0; i<population; i++){
@@ -320,7 +320,6 @@ void *evolve_routine(void*){
                   best_moves[p] = cockroaches[i]->moves[p];
                 }
                 mut_var = false;
-                improved_this_generation = true;
               }
 
               // Euclidean distance remains independent of search orientation.
@@ -334,7 +333,6 @@ void *evolve_routine(void*){
                   best_moves[p] = cockroaches[i]->moves[p];
                 }
                 mut_var = false;
-                improved_this_generation = true;
               }
             }
       }
@@ -347,7 +345,9 @@ void *evolve_routine(void*){
       }
       nanosleep(&tim,&tim2);
       bool rotate_search = false;
-      if (improved_this_generation) {
+      const float current_best_distance = sqrt(pow(end_x - best_x, 2) + pow(end_y - best_y, 2));
+      if (current_best_distance + 0.001F < best_distance_since_rotation) {
+        best_distance_since_rotation = current_best_distance;
         stagnant_generations = 0;
       } else if (++stagnant_generations >= rotation_interval) {
         // Rotate the search frame and restart from the maze entrance.
@@ -356,6 +356,7 @@ void *evolve_routine(void*){
         direction_y = previous_x_direction;
         search_rotation = (search_rotation + 1) % 4;
         stagnant_generations = 0;
+        best_distance_since_rotation = sqrt(pow(end_x - initial_x, 2) + pow(end_y - initial_y, 2));
         rotate_search = true;
       }
       if (rotate_search) {
