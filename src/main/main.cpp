@@ -258,6 +258,7 @@ void *evolve_routine(void*){
   int direction_x = 1;
   int direction_y = 1;
   int search_rotation = 0;
+  int last_rotation_degrees = 0;
   int stagnant_generations = 0;
   float best_distance_since_rotation = sqrt(pow(end_x - initial_x, 2) + pow(end_y - initial_y, 2));
   while (!stop_requested.load()) {
@@ -283,15 +284,15 @@ void *evolve_routine(void*){
                 ++next_y;
               }
 
-              // Reject moves that leave the maze or reach a wall before indexing the map.
-              if (next_x < 0 || next_x >= mapWidth || next_y < 0 || next_y >= mapHeight ||
-                  map[mapHeight - 1 - next_y][next_x] == 1) {
-                cockroaches[i]->dead = true;
-              } else {
+              // Ignore invalid moves and keep the individual at its last valid position.
+              const bool valid_next_position =
+                  next_x >= 0 && next_x < mapWidth && next_y >= 0 && next_y < mapHeight &&
+                  map[mapHeight - 1 - next_y][next_x] != 1;
+              if (valid_next_position) {
                 cockroaches[i]->x = next_x;
                 cockroaches[i]->y = next_y;
               }
-              if (!cockroaches[i]->dead && map[mapHeight - 1 - next_y][next_x] == 2) {
+              if (valid_next_position && map[mapHeight - 1 - next_y][next_x] == 2) {
                 consolidated_path.clear();
                 int path_x = generation_start_x;
                 int path_y = generation_start_y;
@@ -337,7 +338,13 @@ void *evolve_routine(void*){
             }
       }
       if (stop_requested.load()) break;
+      population_lock.unlock();
+      Fl::lock();
+      entities_on_matrix->redraw();
+      Fl::awake();
+      Fl::unlock();
       nanosleep(&tim,&tim2);
+      population_lock.lock();
         }
       if (stop_requested.load()) {
         population_lock.unlock();
@@ -350,11 +357,18 @@ void *evolve_routine(void*){
         best_distance_since_rotation = current_best_distance;
         stagnant_generations = 0;
       } else if (++stagnant_generations >= rotation_interval) {
-        // Rotate the search frame and restart from the maze entrance.
-        const int previous_x_direction = direction_x;
-        direction_x = -direction_y;
-        direction_y = previous_x_direction;
-        search_rotation = (search_rotation + 1) % 4;
+        // Randomly choose a new orthogonal or opposite search orientation.
+        const int rotation_offsets[] = {1, 2, 3};  // +90, 180, or -90 degrees.
+        const int rotation_degrees[] = {90, 180, -90};
+        const int rotation_choice = std::rand() % 3;
+        search_rotation = (search_rotation + rotation_offsets[rotation_choice]) % 4;
+        last_rotation_degrees = rotation_degrees[rotation_choice];
+        switch (search_rotation) {
+          case 0: direction_x = 1; direction_y = 1; break;
+          case 1: direction_x = -1; direction_y = 1; break;
+          case 2: direction_x = -1; direction_y = -1; break;
+          default: direction_x = 1; direction_y = -1; break;
+        }
         stagnant_generations = 0;
         best_distance_since_rotation = sqrt(pow(end_x - initial_x, 2) + pow(end_y - initial_y, 2));
         rotate_search = true;
@@ -378,8 +392,9 @@ void *evolve_routine(void*){
       string aux_gen, aux_mutation;
       aux_gen.append("GENERATION: ");
       aux_gen.append(to_string(gen));
-      aux_gen.append(" | SEARCH ROTATION: ");
-      aux_gen.append(to_string(search_rotation * 90));
+      aux_gen.append(" | LAST TURN: ");
+      if (last_rotation_degrees > 0) aux_gen.append("+");
+      aux_gen.append(to_string(last_rotation_degrees));
       aux_gen.append(" DEG");
       Fl::lock();
       generation->copy_label(aux_gen.c_str());
